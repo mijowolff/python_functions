@@ -442,7 +442,7 @@ def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=T
 
 #%%
 # without cross-validation; separate training and testing data
-def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,cov_metric='covdiag',angspace='default',ang_steps=4,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
+def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='default',ang_steps=4,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
     
     if verbose:
         from progress.bar import ChargingBar
@@ -557,10 +557,10 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,cov_metric
                 m_train_tp=m[:,:,tp]
                 X_test_tp=X_test[:,:,tp]
                 
-                if dist_metric=='mahalanobis'
+                if dist_metric=='mahalanobis':
                     dat_cov_tp=train_dat_cov[:,:,tp]
 
-                     if new_version: # with a lot of dimensions, first performing pca and then using euclidian distance is faster (when using cdist)
+                    if new_version: # with a lot of dimensions, first performing pca and then using euclidian distance is faster (when using cdist)
                         cov=covdiag(dat_cov_tp) # use covariance of the training data for pca
                         train_dat_cov_avg = dat_cov_tp.mean(axis=0)
                         X_test_tp_centered = X_test_tp - train_dat_cov_avg
@@ -582,7 +582,7 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,cov_metric
                 if verbose:    
                     bar.next()  
 
-       distances[ans,:,:,:]=np.mean(distances_temp,axis=2,keepdims=False)
+        distances[ans,:,:,:]=np.mean(distances_temp,axis=2,keepdims=False)
     
     distances=distances-np.mean(distances,axis=1,keepdims=True)
     distances_flat=np.reshape(distances,(distances.shape[0]*distances.shape[1],distances.shape[2],distances.shape[3]),order='F')
@@ -613,9 +613,10 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,cov_metric
     
     return dec_cos,distances,distances_ordered,angspaces,angspace_full
 #%%    
-def dist_nominal_kfold(data,conditions,n_folds=8,n_reps=10,data_trn=None,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',new_version=True):
+def dist_nominal_kfold(data,conditions,n_folds=8,n_reps=10,data_trn=None,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
     
-    # time_now = time.time()
+    if verbose:
+        from progress.bar import ChargingBar
     
     if data_trn is None:
         data_trn=data
@@ -642,7 +643,8 @@ def dist_nominal_kfold(data,conditions,n_folds=8,n_reps=10,data_trn=None,balance
     
     m=np.zeros((len(u_conds),nchans,ntps))   
     
-    bar = ChargingBar('Processing', max=ntps*n_reps*n_folds)
+    if verbose:
+        bar = ChargingBar('Processing', max=ntps*n_reps*n_folds)
     
     rskf = RepeatedStratifiedKFold(n_splits=n_folds, n_repeats=n_reps)
         
@@ -704,8 +706,8 @@ def dist_nominal_kfold(data,conditions,n_folds=8,n_reps=10,data_trn=None,balance
                     distances_temp[:,test_index,irep,tp]=distance.cdist(m_train_tp,X_test_tp,'mahalanobis', VI=cov)
             else:                    
                 distances_temp[:,test_index,irep,tp]=distance.cdist(m_train_tp,X_test_tp,'euclidean')
-                
-            bar.next()
+            if verbose:
+                bar.next()
 
     distances=np.mean(distances_temp,axis=2,keepdims=False)
     
@@ -720,12 +722,16 @@ def dist_nominal_kfold(data,conditions,n_folds=8,n_reps=10,data_trn=None,balance
         temp2=temp1[:,y_subst==cond,:]
         distance_difference[y_subst==cond,:]=np.mean(temp2,axis=0,keepdims=False)-distances[cond,y_subst==cond,:]    
     
-    bar.finish()
+    if verbose:
+        bar.finish()
     return distance_difference,distances,dec_acc,pred_cond
 
-#%%    
-def dist_nominal_kfold_ct(data,conditions,n_folds=8,n_reps=10,data_trn=None,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',new_version=True):
+#%%  cross-temporal   
+def dist_nominal_kfold_ct(data,conditions,n_folds=8,n_reps=10,data_trn=None,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
     
+    if verbose:
+        from progress.bar import ChargingBar
+
     if data_trn is None:
         data_trn=data
         
@@ -751,7 +757,8 @@ def dist_nominal_kfold_ct(data,conditions,n_folds=8,n_reps=10,data_trn=None,bala
     
     m=np.zeros((len(u_conds),nchans,ntps))   
     
-    bar = ChargingBar('Processing', max=ntps*n_reps*n_folds)
+    if verbose:
+        bar = ChargingBar('Processing', max=ntps*n_reps*n_folds)
     
     rskf = RepeatedStratifiedKFold(n_splits=n_folds, n_repeats=n_reps)
         
@@ -818,7 +825,9 @@ def dist_nominal_kfold_ct(data,conditions,n_folds=8,n_reps=10,data_trn=None,bala
                 dists=distance.cdist(m_train_tp,X_test_rs,'euclidean')
             
             distances_temp[:,test_index,irep,tp,:]=dists.reshape(len(u_conds),len(test_index),ntps)
-            bar.next()
+
+            if verbose:
+                bar.next()
 
     distances=np.mean(distances_temp,axis=2,keepdims=False)
     
@@ -833,7 +842,8 @@ def dist_nominal_kfold_ct(data,conditions,n_folds=8,n_reps=10,data_trn=None,bala
         temp2=temp1[:,y_subst==cond,:,:]
         distance_difference[y_subst==cond,:,:]=np.mean(temp2,axis=0,keepdims=False)-distances[cond,y_subst==cond,:,:]    
     
-    bar.finish()
+    if verbose:
+        bar.finish()
     return distance_difference,distances,dec_acc,pred_cond
 # #%%
 # # orientation decoding, leave-out-out approach, as used in Wolff et al., 2017
