@@ -4,7 +4,7 @@ from scipy.spatial import distance
 import numpy as np
 import random
 from numpy.linalg import inv
-from progress.bar import ChargingBar
+
 
 def circ_dist(x,y,all_pairs=False):
     
@@ -125,7 +125,6 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
     angspaces=np.zeros((ang_steps,len(angspace)))
 
     for ans in range(0,ang_steps): # loop over all desired orientation spaces
-    
         angspace_temp=angspace+ans*bin_width/ang_steps
         angspaces[ans,:]=angspace_temp
 
@@ -253,6 +252,9 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
 #%%  orientation resconstrution using cross-validation, cross-temporal
 def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True,angspace='default',ang_steps=4,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
     
+    if verbose:
+        from progress.bar import ChargingBar
+
     if data_trn is None:
         data_trn=data
         
@@ -436,8 +438,180 @@ def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=T
     if verbose:
         bar.finish()
     
-    return dec_cos,distances,distances_ordered,angspaces,angspace_full      
+    return dec_cos,distances,distances_ordered,angspaces,angspace_full 
 
+#%%
+# without cross-validation; separate training and testing data
+def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,cov_metric='covdiag',angspace='default',ang_steps=4,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
+    
+    if verbose:
+        from progress.bar import ChargingBar
+
+    if type(angspace)==str:
+        if angspace=='default':
+            angspace=np.arange(-np.pi,np.pi,np.pi/8)
+        
+    if np.array_equal(angspace,np.unique(theta)):
+        ang_steps=1       
+                
+    bin_width=np.diff(angspace)[0]
+    
+    X_test=data
+    X_train=data_trn    
+    if len(X_train.shape)<3:
+        X_train=np.expand_dims(X_train,axis=-1)
+        
+    if len(X_test.shape)<3:
+        X_test=np.expand_dims(X_test,axis=-1)
+            
+    ntrls, nchans, ntps=np.shape(X_test)  
+
+    m_temp=np.zeros((len(angspace),nchans,ntps))
+    m=m_temp
+    
+    if verbose:
+        bar = ChargingBar('Processing', max=ntps*ang_steps*n_reps)
+    
+    dec_cos=np.empty((ang_steps,ntrls,ntps))
+    distances=np.empty((ang_steps,len(angspace),ntrls,ntps))
+    
+    dec_cos[:]=np.NaN
+    distances[:]=np.NaN
+
+    angspaces=np.zeros((ang_steps,len(angspace)))
+
+    for ans in range(0,ang_steps): # loop over all desired orientation spaces
+        angspace_temp=angspace+ans*bin_width/ang_steps
+        angspaces[ans,:]=angspace_temp
+
+    angspace_full=np.reshape(angspaces,(angspaces.shape[0]*angspaces.shape[1]),order='F')
+
+    theta_dists=circ_dist(angspace_full,theta,all_pairs=True)
+    theta_dists=theta_dists.transpose()  
+
+    theta_dists_temp=np.expand_dims(theta_dists,axis=-1)
+    theta_dists2=np.tile(theta_dists_temp,(1,1,ntps))
+
+    for ans in range(0,ang_steps):
+        angspace_temp=angspace+ans*bin_width/ang_steps
+        
+        temp=np.argmin(abs(circ_dist(angspace_temp,theta,all_pairs=True)),axis=1)
+        ang_bin_temp=np.tile(angspace_temp,(len(theta),1))        
+        
+        bin_orient_rads=ang_bin_temp[:,temp][0,:]
+        y_test=bin_orient_rads
+        
+        distances_temp=np.empty([len(angspace_temp),ntrls,n_reps,ntps])
+        distances_temp[:]=np.NaN
+        
+        theta_dists=circ_dist(angspace_temp,y_test,all_pairs=True);
+        theta_dists=theta_dists.transpose()                
+        
+        theta_dists_temp=np.expand_dims(theta_dists,axis=-1)
+        theta_dists_temp=np.expand_dims(theta_dists_temp,axis=-1)
+        theta_dists2=np.tile(theta_dists_temp,(1,1,n_reps,ntps))
+        theta_dists=np.tile(np.expand_dims(theta_dists,axis=-1),(1,1,ntps))
+        
+        temp=np.argmin(abs(circ_dist(angspace_temp,theta_trn,all_pairs=True)),axis=1)
+        ang_bin_temp=np.tile(angspace_temp,(len(theta_trn),1))        
+        
+        bin_orient_rads=ang_bin_temp[:,temp][0,:]
+        y_subst_train=temp
+        y_train=bin_orient_rads
+                             
+        distances_temp=np.empty([len(angspace_temp),ntrls,n_reps,ntps])
+        distances_temp[:]=np.NaN
+        
+        angspace_dist=np.unique(np.round(theta_dists,10))
+        if -angspace_dist[-1]==angspace_dist[0]:
+            angspace_dist=np.delete(angspace_dist,len(angspace_dist)-1)
+                                       
+        for irep in range(n_reps):
+            train_dat_cov = np.empty((0,X_train.shape[1],X_train.shape[2]))
+            train_dat_cov[:]=np.NaN
+            
+            if balanced_train_bins:
+                count_min=min(np.bincount(y_subst_train))
+                for c in range(len(angspace_temp)):
+                    temp_dat=X_train[y_train==angspace_temp[c],:,:]
+                    ind=random.sample(list(range(temp_dat.shape[0])),count_min)
+                    m_temp[c,:,:]=np.mean(temp_dat[ind,:,:],axis=0)
+                    if balanced_cov:
+                        if residual_cov:
+                            train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:]-np.mean(temp_dat[ind,:,:],axis=0), axis=0)
+                        else:
+                            train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:], axis=0)
+            else:
+                for c in range(len(angspace_temp)):
+                    m_temp[c,:,:]=np.mean(X_train[y_train==angspace_temp[c],:,:],axis=0)
+                    
+            if basis_set:
+                m=basis_set_fun(m_temp,angspace_temp,basis_smooth='default')
+            else:
+                m=m_temp
+        
+            if not balanced_cov:
+                train_dat_cov=X_train                           
+                    
+            for tp in range(ntps):
+                m_train_tp=m[:,:,tp]
+                X_test_tp=X_test[:,:,tp]
+                
+                if dist_metric=='mahalanobis'
+                    dat_cov_tp=train_dat_cov[:,:,tp]
+
+                     if new_version: # with a lot of dimensions, first performing pca and then using euclidian distance is faster (when using cdist)
+                        cov=covdiag(dat_cov_tp) # use covariance of the training data for pca
+                        train_dat_cov_avg = dat_cov_tp.mean(axis=0)
+                        X_test_tp_centered = X_test_tp - train_dat_cov_avg
+                        m_train_tp_centered = m_train_tp -train_dat_cov_avg
+                        evals,evecs = np.linalg.eigh(cov)
+                        idx = evals.argsort()[::-1]
+                        evals = evals[idx]
+                        evecs = evecs[:,idx]
+                        evals_sqrt = np.sqrt(evals)
+
+                        # compute euclidan distance in whitented pca space (which is identical to mahalanobis distance)
+                        distances_temp[:,:,irep,tp] = distance.cdist(np.dot(m_train_tp_centered,evecs)/evals_sqrt, np.dot(X_test_tp_centered,evecs)/evals_sqrt, 'euclidean')
+                    else:                                
+                        cov=inv(covdiag(dat_cov_tp))  
+                        distances_temp[:,:,irep,tp]=distance.cdist(m_train_tp,X_test_tp,'mahalanobis', VI=cov)
+                else:                    
+                    distances_temp[:,:,irep,tp]=distance.cdist(m_train_tp,X_test_tp,'euclidean')
+
+                if verbose:    
+                    bar.next()  
+
+       distances[ans,:,:,:]=np.mean(distances_temp,axis=2,keepdims=False)
+    
+    distances=distances-np.mean(distances,axis=1,keepdims=True)
+    distances_flat=np.reshape(distances,(distances.shape[0]*distances.shape[1],distances.shape[2],distances.shape[3]),order='F')
+    distances_flat=distances_flat-np.mean(distances_flat,axis=0,keepdims=True)
+    dec_cos=np.squeeze(-np.mean(np.cos(theta_dists2)*distances_flat,axis=0))
+
+    # order the distances, such that same angle distances are in the middle
+    # first, assign each theta to a bin from angspace_full
+    temp=np.argmin(abs(circ_dist(angspace_full,theta,all_pairs=True)),axis=1)
+    ang_bin_temp=np.tile(angspace_full,(len(theta),1))               
+    theta_bins=ang_bin_temp[:,temp][0,:]
+
+    # then, sort the distances based on the distances between the theta_bins
+    theta_bin_dists=circ_dist(angspace_full,theta_bins,all_pairs=True)
+    theta_bin_dists=theta_bin_dists.transpose()
+    theta_bin_dists_abs=np.abs(theta_bin_dists)
+    # get index of the minimum distance
+    theta_bin_dists_min_ind=np.argmin(theta_bin_dists_abs,axis=0)
+
+    distances_ordered=np.zeros((distances_flat.shape))
+
+    shift_to=np.where(angspace_full==0)[0][0]
+    for trl in range(len(theta)):
+        distances_ordered[:,trl,:] = np.roll(distances_flat[:,trl,:], int(shift_to - theta_bin_dists_min_ind[trl]), axis=0)
+    
+    if verbose:
+        bar.finish()
+    
+    return dec_cos,distances,distances_ordered,angspaces,angspace_full
 #%%    
 def dist_nominal_kfold(data,conditions,n_folds=8,n_reps=10,data_trn=None,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',new_version=True):
     
