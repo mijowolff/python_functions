@@ -4,6 +4,7 @@ from scipy.spatial import distance
 import numpy as np
 import random
 from numpy.linalg import inv
+import warnings
 
 
 def circ_dist(x,y,all_pairs=False):
@@ -53,7 +54,9 @@ def covdiag(x):
     r2=1/n/t**2*np.sum(np.dot(y.T,y))-1/n/t*np.sum(sample**2)
     
     #compute the estimator
-    shrinkage=max(0,min(1,r2/d))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        shrinkage=max(0,min(1,r2/d))
     sigma=shrinkage*prior+(1-shrinkage)*sample
     
     return sigma
@@ -205,6 +208,7 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
                         idx = evals.argsort()[::-1]
                         evals = evals[idx]
                         evecs = evecs[:,idx]
+                        evals=evals.clip(1e-10) # avoid division by zero
                         evals_sqrt = np.sqrt(evals)
 
                         # compute euclidan distance in whitented pca space (which is identical to mahalanobis distance)
@@ -395,6 +399,7 @@ def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=T
                         idx = evals.argsort()[::-1]
                         evals = evals[idx]
                         evecs = evecs[:,idx]
+                        evals=evals.clip(1e-10) # avoid division by zero
                         evals_sqrt = np.sqrt(evals)
 
                         dists = distance.cdist(np.dot(m_train_tp_centered,evecs)/evals_sqrt, np.dot(X_test_rs_centered,evecs)/evals_sqrt, 'euclidean')
@@ -569,6 +574,7 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='
                         idx = evals.argsort()[::-1]
                         evals = evals[idx]
                         evecs = evecs[:,idx]
+                        evals=evals.clip(1e-10) # avoid division by zero
                         evals_sqrt = np.sqrt(evals)
 
                         # compute euclidan distance in whitented pca space (which is identical to mahalanobis distance)
@@ -612,7 +618,7 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='
         bar.finish()
     
     return dec_cos,distances,distances_ordered,angspaces,angspace_full
-#%%    
+#%% categorical decoding using cross-validation   
 def dist_nominal_kfold(data,conditions,n_folds=8,n_reps=10,data_trn=None,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
     
     if verbose:
@@ -698,6 +704,7 @@ def dist_nominal_kfold(data,conditions,n_folds=8,n_reps=10,data_trn=None,balance
                     idx = evals.argsort()[::-1]
                     evals = evals[idx]
                     evecs = evecs[:,idx]
+                    evals=evals.clip(1e-10) # avoid division by zero
                     evals_sqrt = np.sqrt(evals)
                         # compute euclidan distance in whitented pca space (which is identical to mahalanobis distance)
                     distances_temp[:,test_index,irep,tp] = distance.cdist(np.dot(m_train_tp_centered,evecs)/evals_sqrt, np.dot(X_test_tp_centered,evecs)/evals_sqrt, 'euclidean')
@@ -815,6 +822,7 @@ def dist_nominal_kfold_ct(data,conditions,n_folds=8,n_reps=10,data_trn=None,bala
                     idx = evals.argsort()[::-1]
                     evals = evals[idx]
                     evecs = evecs[:,idx]
+                    evals=evals.clip(1e-10) # avoid division by zero
                     evals_sqrt = np.sqrt(evals)
                         # compute euclidan distance in whitented pca space (which is identical to mahalanobis distance)
                     dists = distance.cdist(np.dot(m_train_tp_centered,evecs)/evals_sqrt, np.dot(X_test_rs_centered,evecs)/evals_sqrt, 'euclidean')
@@ -841,6 +849,111 @@ def dist_nominal_kfold_ct(data,conditions,n_folds=8,n_reps=10,data_trn=None,bala
         temp1=distances[np.setdiff1d(u_conds,cond),:,:,:]
         temp2=temp1[:,y_subst==cond,:,:]
         distance_difference[y_subst==cond,:,:]=np.mean(temp2,axis=0,keepdims=False)-distances[cond,y_subst==cond,:,:]    
+    
+    if verbose:
+        bar.finish()
+    return distance_difference,distances,dec_acc,pred_cond
+#%% categorical decoding, with separate training and testing data  
+def dist_nominal(data,conditions,data_trn,conditions_trn,n_reps=10,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
+    
+    if verbose:
+        from progress.bar import ChargingBar
+        
+    u_conds_test=np.unique(conditions)
+    u_conds_train=np.unique(conditions_trn)
+    
+    # convert conditions to integers, in case they aren't
+    y_test=np.zeros(conditions.shape)    
+    y_train=np.zeros(conditions_trn.shape)       
+    for c in range(len(u_conds_test)):
+        y_test[conditions==u_conds_test[c]]=c
+    for c in range(len(u_conds_train)):
+        y_train[conditions_trn==u_conds_train[c]]=c
+    
+    X_ts=data
+    X_tr=data_trn    
+    if len(X_tr.shape)<3:
+        X_tr=np.expand_dims(X_tr,axis=-1)
+        
+    if len(X_ts.shape)<3:
+        X_ts=np.expand_dims(X_ts,axis=-1)
+                    
+    ntrls_tst, nchans_tst, ntps_tst=np.shape(X_ts)
+    ntrls_trn, nchans_trn, ntps_trn=np.shape(X_tr)
+    
+    m=np.zeros((len(u_conds_train),nchans_trn,ntps_trn))   
+    
+    if verbose:
+        bar = ChargingBar('Processing', max=ntps_trn*n_reps)
+            
+    distances_temp=np.empty([len(u_conds_test),ntrls_tst,n_reps,ntps_tst])
+    distances_temp[:]=np.NaN                 
+
+    X_train, X_test = X_tr, X_ts
+    y_train=conditions_trn
+    y_test=conditions            
+      
+    for irep in range(n_reps):
+        train_dat_cov = np.empty((0,X_train.shape[1],X_train.shape[2]))
+        train_dat_cov[:]=np.NaN
+        
+        if balanced_train_bins:
+            count_min=min(np.bincount(y_train))
+            for c in range(len(u_conds_train)):
+                temp_dat=X_train[y_train==u_conds_train[c],:,:]
+                ind=random.sample(list(range(temp_dat.shape[0])),count_min)
+                m[c,:,:]=np.mean(temp_dat[ind,:,:],axis=0)
+                if balanced_cov:
+                    if residual_cov:
+                        train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:]-np.mean(temp_dat[ind,:,:],axis=0), axis=0)
+                    else:
+                        train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:], axis=0)
+        else:
+            for c in range(len(u_conds_train)):
+                m[c,:,:]=np.mean(X_train[y_train==u_conds_train[c],:,:],axis=0)         
+        
+        if not balanced_cov:
+            train_dat_cov=X_train                          
+            
+        for tp in range(ntps_trn):
+            m_train_tp=m[:,:,tp]
+            X_test_tp=X_test[:,:,tp]
+            
+            if dist_metric=='mahalanobis':
+                dat_cov_tp=train_dat_cov[:,:,tp]
+                if new_version: # euclidian in pca space (same as mahalanobis distance) is faster for high-dimensional data
+                    cov=covdiag(dat_cov_tp) # use covariance of the training data for pca
+                    train_dat_cov_avg = dat_cov_tp.mean(axis=0)
+                    X_test_tp_centered = X_test_tp - train_dat_cov_avg
+                    m_train_tp_centered = m_train_tp -train_dat_cov_avg
+                    evals,evecs = np.linalg.eigh(cov)
+                    idx = evals.argsort()[::-1]
+                    evals = evals[idx]
+                    evecs = evecs[:,idx]
+                    evals=evals.clip(1e-10) # avoid division by zero
+                    evals_sqrt = np.sqrt(evals)
+                        # compute euclidan distance in whitented pca space (which is identical to mahalanobis distance)
+                    distances_temp[:,:,irep,tp] = distance.cdist(np.dot(m_train_tp_centered,evecs)/evals_sqrt, np.dot(X_test_tp_centered,evecs)/evals_sqrt, 'euclidean')
+                else:                                 
+                    cov=inv(covdiag(dat_cov_tp))                                     
+                    distances_temp[:,:,irep,tp]=distance.cdist(m_train_tp,X_test_tp,'mahalanobis', VI=cov)
+            else:                    
+                distances_temp[:,:,irep,tp]=distance.cdist(m_train_tp,X_test_tp,'euclidean')
+            if verbose:
+                bar.next()
+
+    distances=np.mean(distances_temp,axis=2,keepdims=False)
+    
+    pred_cond=np.argmin(distances,axis=0)
+    temp=np.transpose(np.tile(y_test,(pred_cond.shape[1],1)))
+    dec_acc=pred_cond==temp
+    
+    distance_difference=np.zeros([ntrls_tst,ntps_tst])
+    
+    for cond in u_conds_test:
+        temp1=distances[np.setdiff1d(u_conds_test,cond),:,:]
+        temp2=temp1[:,y_test==cond,:]
+        distance_difference[y_test==cond,:]=np.mean(temp2,axis=0,keepdims=False)-distances[cond,y_test==cond,:]    
     
     if verbose:
         bar.finish()
