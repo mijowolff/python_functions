@@ -244,7 +244,7 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
 
     distances_ordered=np.zeros((distances_flat.shape))
 
-    shift_to=np.where(angspace_full==0)[0][0]
+    shift_to=np.where(np.round(angspace_full,10)==0)[0][0]
     for trl in range(len(theta)):
         distances_ordered[:,trl,:] = np.roll(distances_flat[:,trl,:], int(shift_to - theta_bin_dists_min_ind[trl]), axis=0)
     
