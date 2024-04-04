@@ -631,7 +631,7 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='
     
     return dec_cos,distances,distances_ordered,angspaces,angspace_full
 #%%  orientation resconstruction, no cross-validation, cross-temporal
-def dist_theta_ct(data,theta,data_trn,theta_trn,n_reps=10,data_trn=None,basis_set=True,angspace='default',ang_steps=4,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
+def dist_theta_ct(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='default',ang_steps=4,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
     
     if verbose:
         from progress.bar import ChargingBar
