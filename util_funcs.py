@@ -181,10 +181,12 @@ def cluster_test(datobs, datrnd, tail=None, alpha=0.05, clusteralpha=0.05, clust
     for i, obs_neg in enumerate(clus_observed_neg):
         clus_p_neg[i] = (np.sum(null_neg < obs_neg) + 1) / (numrnd + 1)
 
-    if np.ndim(datobs) == 1:
-        p = np.ones_like(datobs)
-    else:
-        p = np.ones(datobs.shape[:-1])
+    # if np.ndim(datobs) == 1:
+    #     p = np.ones_like(datobs)
+    # else:
+    #     p = np.ones(datobs.shape[:-1])
+
+    p = np.ones_like(datobs)
 
     clusterinfo = {'pos_clusters': [], 'neg_clusters': []}
 
