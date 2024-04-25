@@ -145,7 +145,7 @@ def mahal_CV_RSA(data,conditions,n_folds=8,n_reps=100,data_trn=None,cov_metric='
     
     return RDM,cond_combs
 #%%
-def RSA_GLM(RDM,models,zscore_models=True,zscore_RDM=True,residual=False):
+def RSA_GLM(RDM,models,zscore_models=True,zscore_RDM=True,ddof=0,residual=False):
     
     if len(models.shape)<3:
         models=np.expand_dims(models,axis=-1)
@@ -155,12 +155,12 @@ def RSA_GLM(RDM,models,zscore_models=True,zscore_RDM=True,residual=False):
     for m in range(models.shape[-1]):
         model_temp=np.squeeze(models[:,:,m]).flatten()
         if zscore_models:           
-            X[:,m]=zscore(model_temp)
+            X[:,m]=zscore(model_temp,ddof=ddof)
         else:
             X[:,m]=model_temp
             
     if zscore_RDM:
-        Y=zscore(RDM.flatten())
+        Y=zscore(RDM.flatten(),ddof=ddof)
     else:
         Y=RDM.flatten()
         

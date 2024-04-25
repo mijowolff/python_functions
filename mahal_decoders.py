@@ -229,9 +229,9 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
 
         distances[ans,:,:,:]=np.mean(distances_temp,axis=2,keepdims=False)
     
-    distances=distances-np.mean(distances,axis=1,keepdims=True)
+    distances=distances-np.mean(distances,axis=1,keepdims=True) # mean-center across trials
     distances_flat=np.reshape(distances,(distances.shape[0]*distances.shape[1],distances.shape[2],distances.shape[3]),order='F')
-    distances_flat=distances_flat-np.mean(distances_flat,axis=0,keepdims=True)
+    distances_flat=distances_flat-np.mean(distances_flat,axis=0,keepdims=True) # mean-center across bins
     dec_cos=np.squeeze(-np.mean(np.cos(theta_dists2)*distances_flat,axis=0))
 
     # order the distances, such that same angle distances are in the middle
@@ -316,7 +316,10 @@ def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=T
     theta_dists=circ_dist(angspace_full,theta,all_pairs=True)
     theta_dists=theta_dists.transpose()  
 
+    # add two dimensions to theta_dists
     theta_dists_temp=np.expand_dims(theta_dists,axis=-1)
+
+    theta_dists_temp=np.expand_dims(theta_dists_temp,axis=-1)
     theta_dists2=np.tile(theta_dists_temp,(1,1,ntps_trn,ntps))
 
     for ans in range(0,ang_steps): # loop over all desired orientation spaces
@@ -341,10 +344,10 @@ def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=T
         theta_dists=circ_dist(angspace_temp,y,all_pairs=True)
         theta_dists=theta_dists.transpose()                
         
-        theta_dists_temp=np.expand_dims(theta_dists,axis=-1)
-        theta_dists_temp=np.expand_dims(theta_dists_temp,axis=-1)
-        theta_dists_temp=np.expand_dims(theta_dists_temp,axis=-1)
-        theta_dists2=np.tile(theta_dists_temp,(1,1,n_reps,ntps,ntps))
+        # theta_dists_temp=np.expand_dims(theta_dists,axis=-1)
+        # theta_dists_temp=np.expand_dims(theta_dists_temp,axis=-1)
+        # theta_dists_temp=np.expand_dims(theta_dists_temp,axis=-1)
+        # theta_dists2=np.tile(theta_dists_temp,(1,1,n_reps,ntps,ntps))
         theta_dists=np.tile(np.expand_dims(theta_dists,axis=-1),(1,1,ntps))
         
         angspace_dist=np.unique(np.round(theta_dists,10))
@@ -428,6 +431,7 @@ def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=T
         distances[ans,:,:,:,:]=np.mean(distances_temp,axis=2,keepdims=False)
     
     distances=distances-np.mean(distances,axis=1,keepdims=True)
+    
     distances_flat=np.reshape(distances,(distances.shape[0]*distances.shape[1],distances.shape[2],distances.shape[3],distances.shape[4]),order='F')
     distances_flat=distances_flat-np.mean(distances_flat,axis=0,keepdims=True)
     dec_cos=np.squeeze(-np.mean(np.cos(theta_dists2)*distances_flat,axis=0))
@@ -523,11 +527,6 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='
         theta_dists=circ_dist(angspace_temp,y_test,all_pairs=True);
         theta_dists=theta_dists.transpose()                
         
-        theta_dists_temp=np.expand_dims(theta_dists,axis=-1)
-        theta_dists_temp=np.expand_dims(theta_dists_temp,axis=-1)
-        theta_dists2=np.tile(theta_dists_temp,(1,1,n_reps,ntps))
-        theta_dists=np.tile(np.expand_dims(theta_dists,axis=-1),(1,1,ntps))
-        
         temp=np.argmin(abs(circ_dist(angspace_temp,theta_trn,all_pairs=True)),axis=1)
         ang_bin_temp=np.tile(angspace_temp,(len(theta_trn),1))        
         
@@ -545,6 +544,9 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='
         for irep in range(n_reps):
             train_dat_cov = np.empty((0,X_train.shape[1],X_train.shape[2]))
             train_dat_cov[:]=np.NaN
+
+            train_dat_res_cov = np.empty((0,X_train.shape[1],X_train.shape[2]))
+            train_dat_res_cov[:]=np.NaN
             
             if balanced_train_bins:
                 count_min=min(np.bincount(y_subst_train))
@@ -581,7 +583,7 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='
                     if new_version: # with a lot of dimensions, first performing pca and then using euclidian distance is faster (when using cdist)
                         cov=covdiag(dat_cov_res_tp) # use covariance of the training data for pca
                         train_dat_cov_avg = dat_cov_tp.mean(axis=0)
-                        X_test_rs_centered = X_test_rs - train_dat_cov_avg
+                        X_test_tp_centered = X_test_tp - train_dat_cov_avg
                         m_train_tp_centered = m_train_tp -train_dat_cov_avg
                         evals,evecs = np.linalg.eigh(cov)
                         idx = evals.argsort()[::-1]
@@ -656,7 +658,7 @@ def dist_theta_ct(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspac
     if len(X_ts.shape)<3:
         X_ts=np.expand_dims(X_ts,axis=-1)
           
-    ntrls_tst, nchans_tst, ntps_tst=np.shape(X_ts)
+    ntrls, nchans_tst, ntps=np.shape(X_ts)
     ntrls_trn, nchans_trn, ntps_trn=np.shape(X_tr) 
 
     m_temp=np.zeros((len(angspace),nchans_trn,ntps_trn))
@@ -665,8 +667,8 @@ def dist_theta_ct(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspac
     if verbose:
         bar = ChargingBar('Processing', max=ang_steps*n_reps*ntps_trn)
     
-    dec_cos=np.empty((ang_steps,ntrls_tst,ntps_trn,ntps_tst))
-    distances=np.empty((ang_steps,len(angspace),ntrls_tst,ntps_trn,ntps_tst))
+    dec_cos=np.empty((ang_steps,ntrls,ntps_trn,ntps))
+    distances=np.empty((ang_steps,len(angspace),ntrls,ntps_trn,ntps))
     
     dec_cos[:]=np.NaN
     distances[:]=np.NaN
@@ -683,6 +685,7 @@ def dist_theta_ct(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspac
     theta_dists=theta_dists.transpose()  
 
     theta_dists_temp=np.expand_dims(theta_dists,axis=-1)
+    theta_dists_temp=np.expand_dims(theta_dists_temp,axis=-1)
     theta_dists2=np.tile(theta_dists_temp,(1,1,ntps_trn,ntps))
 
     for ans in range(0,ang_steps): # loop over all desired orientation spaces
@@ -694,16 +697,16 @@ def dist_theta_ct(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspac
         bin_orient_rads=ang_bin_temp[:,temp][0,:]
         y_test=bin_orient_rads
         
-        distances_temp=np.empty([len(angspace_temp),ntrls,n_reps,ntps])
+        distances_temp=np.empty([len(angspace_temp),ntrls,n_reps,ntps_trn,ntps])
         distances_temp[:]=np.NaN
-        
-        theta_dists=circ_dist(angspace_temp,y_test,all_pairs=True);
+
+        theta_dists=circ_dist(angspace_temp,y_test,all_pairs=True)
         theta_dists=theta_dists.transpose()                
         
-        theta_dists_temp=np.expand_dims(theta_dists,axis=-1)
-        theta_dists_temp=np.expand_dims(theta_dists_temp,axis=-1)
-        theta_dists2=np.tile(theta_dists_temp,(1,1,n_reps,ntps))
-        theta_dists=np.tile(np.expand_dims(theta_dists,axis=-1),(1,1,ntps))
+        # theta_dists_temp=np.expand_dims(theta_dists,axis=-1)
+        # theta_dists_temp=np.expand_dims(theta_dists_temp,axis=-1)
+        # theta_dists2=np.tile(theta_dists_temp,(1,1,n_reps,ntps))
+        # theta_dists=np.tile(np.expand_dims(theta_dists,axis=-1),(1,1,ntps))
         
         temp=np.argmin(abs(circ_dist(angspace_temp,theta_trn,all_pairs=True)),axis=1)
         ang_bin_temp=np.tile(angspace_temp,(len(theta_trn),1))        
@@ -712,21 +715,21 @@ def dist_theta_ct(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspac
         y_subst_train=temp
         y_train=bin_orient_rads
                              
-        distances_temp=np.empty([len(angspace_temp),ntrls,n_reps,ntps])
-        distances_temp[:]=np.NaN
-        
         angspace_dist=np.unique(np.round(theta_dists,10))
         if -angspace_dist[-1]==angspace_dist[0]:
             angspace_dist=np.delete(angspace_dist,len(angspace_dist)-1)
                
         for irep in range(n_reps):
-            train_dat_cov = np.empty((0,X_train.shape[1],X_train.shape[2]))
+            train_dat_cov = np.empty((0,X_tr.shape[1],X_tr.shape[2]))
             train_dat_cov[:]=np.NaN
+
+            train_dat_res_cov = np.empty((0,X_tr.shape[1],X_tr.shape[2]))
+            train_dat_res_cov[:]=np.NaN
             
             if balanced_train_bins:
                 count_min=min(np.bincount(y_subst_train))
                 for c in range(len(angspace_temp)):
-                    temp_dat=X_train[y_train==angspace_temp[c],:,:]
+                    temp_dat=X_tr[y_train==angspace_temp[c],:,:]
                     ind=random.sample(list(range(temp_dat.shape[0])),count_min)
                     m_temp[c,:,:]=np.mean(temp_dat[ind,:,:],axis=0)
                     if balanced_cov:
@@ -735,7 +738,7 @@ def dist_theta_ct(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspac
                         train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:], axis=0) 
             else:
                 for c in range(len(angspace_temp)):
-                    m_temp[c,:,:]=np.mean(X_train[y_train==angspace_temp[c],:,:],axis=0)
+                    m_temp[c,:,:]=np.mean(X_tr[y_train==angspace_temp[c],:,:],axis=0)
                     
             if basis_set:
                 m=basis_set_fun(m_temp,angspace_temp,basis_smooth='default')
@@ -750,7 +753,7 @@ def dist_theta_ct(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspac
                                
             # reshape test data for efficient distance computation
             X_test_rs=np.moveaxis(X_ts,-1,1)
-            X_test_rs=np.reshape(X_test_rs,(X_ts.shape[0]*ntps_tst,X_ts.shape[1]),order='C')
+            X_test_rs=np.reshape(X_test_rs,(X_ts.shape[0]*ntps,X_ts.shape[1]),order='C')
 
             for tp in range(ntps_trn):
                 m_train_tp=m[:,:,tp]
@@ -777,7 +780,7 @@ def dist_theta_ct(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspac
                 else:                    
                     dists=distance.cdist(m_train_tp,X_test_rs,'euclidean')
 
-                distances_temp[:,:,irep,tp,:]=dists.reshape(len(angspace_temp),X_ts.shape[0],ntps_tst)
+                distances_temp[:,:,irep,tp,:]=dists.reshape(len(angspace_temp),X_ts.shape[0],ntps)
                 
                 if verbose:
                     bar.next()
