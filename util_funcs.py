@@ -99,8 +99,11 @@ def circ_dist(x,y,all_pairs=False):
         circ_dists= np.angle(np.exp(1j*x)/np.exp(1j*y))
         
     return circ_dists
-
 #%%
+import numpy as np
+from scipy.ndimage import label
+from scipy.stats import percentileofscore
+
 def cluster_test(datobs, datrnd, tail=None, alpha=0.05, clusteralpha=0.05, clusterstat='sum'):
     """
     CLUSTER_TEST performs a cluster-corrected test that datobs is higher/lower
@@ -108,63 +111,72 @@ def cluster_test(datobs, datrnd, tail=None, alpha=0.05, clusteralpha=0.05, clust
     distribution should be pre-computed (manually or using CLUSTER_TEST_HELPER)
     and entered as an argument into this function.
 
-    datobs - observed data MxNx...xZ
-    datrnd - null distribution, MxNx...xZxPerm
-    tail - whether to test datobs < null (tail==-1), datobs > null (tail==1)
-    or datobs <> null (tail==0, default).
-    alpha - critical level (default 0.05)
-    clusteralpha - nonparametric threshold for cluster candidates (default 0.05)
-    clusterstat - how to combine statistics in cluster candidates (can be
-    'sum' (default) or 'size')
+    Parameters:
+    datobs : array_like
+        observed data MxNx...xZ
+    datrnd : array_like
+        null distribution, MxNx...xZxPerm
+    tail : int, optional
+        whether to test datobs < null (tail==-1), datobs > null (tail==1)
+        or datobs <> null (tail==0, default).
+    alpha : float, optional
+        critical level (default 0.05)
+    clusteralpha : float, optional
+        nonparametric threshold for cluster candidates (default 0.05)
+    clusterstat : {'sum', 'size'}, optional
+        how to combine statistics in cluster candidates (default 'sum')
 
     Returns:
-    h - MxNx...xZ logical matrix indicating where significant clusters were
-    found (though note that formally speaking the test concerns the data as a
-    whole, so the interpretation of the location of clusters within h should
-    be done with caution).
-    p - MxNx...xZ matrix of p-values associated with clusters.
-    clusterinfo - struct with extra cluster info, e.g. indices
+    h : ndarray
+        MxNx...xZ logical array indicating where significant clusters were
+        found (though note that formally speaking the test concerns the data as a
+        whole, so the interpretation of the location of clusters within h should
+        be done with caution).
+    p : ndarray
+        MxNx...xZ array of p-values associated with clusters.
+
 
     Originally written in Matlab by Eelke Spaak, 2015
     """
 
-    # Defaults handling
+    # defaults handling
     if tail is None:
         tail = 0
 
-    if clusterstat not in ['sum', 'size']:
-        raise ValueError("Unsupported clusterstat")
-
-    # Some bookkeeping
+    # some bookkeeping
     rndsiz = datrnd.shape
     rnddim = len(rndsiz)
     numrnd = rndsiz[rnddim - 1]
 
-    if not (np.all(datobs.shape == rndsiz[:-1]) or (np.ndim(datobs) == 1 and len(datobs) == rndsiz[0])):
-        raise ValueError("datobs and datrnd are not of compatible dimensionality")
+    if not np.array_equal(datobs.shape, rndsiz[:-1]) and (not np.isscalar(datobs) or not np.array_equal([datobs.size], [rndsiz[0]])):
+        raise ValueError('datobs and datrnd are not of compatible dimensionality')
 
-    # Handle different options for computing cluster characteristics
-    cluster_stat_sum = clusterstat == 'sum'
-    cluster_stat_size = clusterstat == 'size'
+    # handle the different options for computing cluster characteristics
+    cluster_stat_sum = (clusterstat == 'sum')
+    cluster_stat_size = (clusterstat == 'size')
+    if not cluster_stat_sum and not cluster_stat_size:
+        raise ValueError('unsupported clusterstat')
 
-    # Actual cluster test
-    clusteralpha = clusteralpha / 2 if tail == 0 else clusteralpha
+    # actual cluster test
+    if tail == 0:
+        clusteralpha = clusteralpha / 2
 
-    cluster_threshold_neg = np.quantile(datrnd, clusteralpha, axis=rnddim - 1)
-    cluster_threshold_pos = np.quantile(datrnd, 1 - clusteralpha, axis=rnddim - 1)
+    cluster_threshold_neg = np.percentile(datrnd, clusteralpha * 100, axis=rnddim-1)
+    cluster_threshold_pos = np.percentile(datrnd, (1 - clusteralpha) * 100, axis=rnddim-1)
 
-    clus_observed_pos, pos_inds = find_and_characterize_clusters(datobs, datobs >= cluster_threshold_pos)
-    clus_observed_neg, neg_inds = find_and_characterize_clusters(datobs, datobs <= cluster_threshold_neg)
+    clus_observed_pos, pos_inds = find_and_characterize_clusters2(datobs, datobs >= cluster_threshold_pos,clusterstat)
+    clus_observed_neg, neg_inds = find_and_characterize_clusters2(datobs, datobs <= cluster_threshold_neg,clusterstat)
 
-    null_pos = np.empty(numrnd)
-    null_neg = np.empty(numrnd)
+    null_pos = np.zeros(numrnd)
+    null_neg = np.zeros(numrnd)
 
     for k in range(numrnd):
-        clus_rnd_pos, _ = find_and_characterize_clusters(datrnd[..., k], datrnd[..., k] >= cluster_threshold_pos)
-        clus_rnd_neg, _ = find_and_characterize_clusters(datrnd[..., k], datrnd[..., k] <= cluster_threshold_neg)
-        
-        null_pos[k] = np.max(clus_rnd_pos) if clus_rnd_pos.size else np.nan
-        null_neg[k] = np.min(clus_rnd_neg) if clus_rnd_neg.size else np.nan
+        clus_rnd_pos, _ = find_and_characterize_clusters2(datrnd[..., k], datrnd[..., k] >= cluster_threshold_pos,clusterstat)
+        clus_rnd_neg, _ = find_and_characterize_clusters2(datrnd[..., k], datrnd[..., k] <= cluster_threshold_neg,clusterstat)
+        if len(clus_rnd_pos) > 0:
+            null_pos[k] = np.max(clus_rnd_pos)
+        if len(clus_rnd_neg) > 0:
+            null_neg[k] = np.min(clus_rnd_neg)
 
     null_pos = null_pos[~np.isnan(null_pos)]
     null_neg = null_neg[~np.isnan(null_neg)]
@@ -175,55 +187,49 @@ def cluster_test(datobs, datrnd, tail=None, alpha=0.05, clusteralpha=0.05, clust
     clus_p_pos = np.ones_like(clus_observed_pos)
     clus_p_neg = np.ones_like(clus_observed_neg)
 
-    for i, obs_pos in enumerate(clus_observed_pos):
-        clus_p_pos[i] = (np.sum(null_pos > obs_pos) + 1) / (numrnd + 1)
+    for k, obs_stat in enumerate(clus_observed_pos):
+        clus_p_pos[k] = (np.sum(null_pos > obs_stat) + 1) / (numrnd + 1)
 
-    for i, obs_neg in enumerate(clus_observed_neg):
-        clus_p_neg[i] = (np.sum(null_neg < obs_neg) + 1) / (numrnd + 1)
+    for k, obs_stat in enumerate(clus_observed_neg):
+        clus_p_neg[k] = (np.sum(null_neg < obs_stat) + 1) / (numrnd + 1)
 
-    # if np.ndim(datobs) == 1:
-    #     p = np.ones_like(datobs)
-    # else:
-    #     p = np.ones(datobs.shape[:-1])
-
+    # post-processing of output
     p = np.ones_like(datobs)
-
-    clusterinfo = {'pos_clusters': [], 'neg_clusters': []}
-
     if tail >= 0:
-        for i, pos_ind in enumerate(pos_inds):
-            p[pos_ind] = clus_p_pos[i]
-
-            clusterinfo['pos_clusters'].append({
-                'clusterstat': clus_observed_pos[i],
-                'p': clus_p_pos[i],
-                'inds': np.zeros_like(datobs).astype(bool)
-            })
-            clusterinfo['pos_clusters'][i]['inds'][pos_ind] = True
-
-            if tail == 0:
-                clusterinfo['pos_clusters'][i]['p'] *= 2
+        for k, p_val in enumerate(clus_p_pos):
+            p[pos_inds[k]] = p_val
 
     if tail <= 0:
-        for i, neg_ind in enumerate(neg_inds):
-            p[neg_ind] = clus_p_neg[i]
-
-            clusterinfo['neg_clusters'].append({
-                'clusterstat': clus_observed_neg[i],
-                'p': clus_p_neg[i],
-                'inds': np.zeros_like(datobs).astype(bool)
-            })
-            clusterinfo['neg_clusters'][i]['inds'][neg_ind] = True
-
-            if tail == 0:
-                clusterinfo['neg_clusters'][i]['p'] *= 2
+        for k, p_val in enumerate(clus_p_neg):
+            # if p_val < p[neg_inds[k][0]]:
+            p[neg_inds[k]] = p_val
 
     if tail == 0:
-        p = np.minimum(1, p * 2)
+        p *= 2
+        p = np.minimum(1, p)
 
     h = p < alpha
 
-    return h, p, clusterinfo
+    return h, p, None
+
+def find_and_characterize_clusters2(dat, clus_cand,clusterstat):
+    labeled_array, num_features = label(clus_cand)
+    clus_stats = []
+    inds = []
+
+    for i in range(1, num_features + 1):
+        cluster_indices = np.where(labeled_array == i)
+        cluster_values = dat[cluster_indices]
+        if cluster_values.size > 1:
+            if clusterstat == 'sum':
+                clus_stats.append(np.sum(cluster_values))
+            elif clusterstat == 'size':
+                clus_stats.append(len(cluster_values))
+            inds.append(cluster_indices)
+
+    return clus_stats, inds
+
+#%%
 
 def find_and_characterize_clusters(dat, clus_cand):
     labeled_array, num_features = label(clus_cand)
@@ -234,6 +240,7 @@ def find_and_characterize_clusters(dat, clus_cand):
 
     for obj in objects:
         mask = labeled_array[obj] == (np.arange(1, num_features + 1)[..., np.newaxis, np.newaxis])
+        # clus_stats.append(np.sum(dat[obj] * mask) if np.sum(mask) > 1 else 0)
         clus_stats.append(np.sum(dat[obj] * mask) if np.sum(mask) > 1 else 0)
         inds.append(obj)
     
