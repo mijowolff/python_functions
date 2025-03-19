@@ -8,7 +8,7 @@ combine channel and time dimensions, for potentially improved subsequent multiva
 
 """
 import numpy as np
-from scipy.ndimage.filters import uniform_filter1d
+from scipy.ndimage import uniform_filter1d
 import warnings
 
 def dat_prep_4d_time_course(data,time_dat,toi,window_length=100,span=10,steps=10,relative_baseline=True,window_center='right',in_ms=True):

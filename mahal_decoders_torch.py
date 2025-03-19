@@ -3,8 +3,10 @@ from sklearn.model_selection import RepeatedStratifiedKFold
 from scipy.spatial import distance
 import numpy as np
 import random
-from numpy.linalg import inv
+from torch.linalg import inv
 import warnings
+import torch
+import torchpairwise
 
 
 def circ_dist(x,y,all_pairs=False):
@@ -36,30 +38,30 @@ def covdiag(x):
     as described in Ledoit and Wolf, 2004
     '''
     
-    t,n=np.shape(x)
-    
-    # de-mean
-    x=x-np.mean(x,axis=0)
-    
-    #get sample covariance matrix
-    sample=np.cov(x,rowvar=False,bias=True)
-    
-    #compute prior
-    prior=np.zeros((n,n))
-    np.fill_diagonal(prior,np.diag(sample))
-    
-    #compute shrinkage parameters
-    d=1/n*np.linalg.norm(sample-prior,ord='fro')**2
-    y=x**2
-    r2=1/n/t**2*np.sum(np.dot(y.T,y))-1/n/t*np.sum(sample**2)
-    
-    #compute the estimator
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        shrinkage=max(0,min(1,r2/d))
-    sigma=shrinkage*prior+(1-shrinkage)*sample
-    
+    t, n = x.shape
+
+    # De-mean
+    x = x - x.mean(dim=0, keepdim=True)
+
+    # Get sample covariance matrix
+    sample = (x.T @ x) / t
+
+    # Compute prior (diagonal of sample covariance matrix)
+    prior = torch.diag(torch.diag(sample))
+
+    # Compute shrinkage parameters
+    d = (1 / n) * torch.norm(sample - prior, p='fro') ** 2
+    y = x ** 2
+    r2 = (1 / (n * t**2)) * torch.sum(y.T @ y) - (1 / (n * t)) * torch.sum(sample ** 2)
+
+    # Compute the shrinkage intensity
+    shrinkage = torch.clamp(r2 / d, min=0, max=1)
+
+    # Compute the estimator
+    sigma = shrinkage * prior + (1 - shrinkage) * sample
+
     return sigma
+
 
 def cosfun(theta,mu,basis_smooth,amplitude='default',offset='default'):
 
@@ -205,22 +207,35 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
                 if dist_metric=='mahalanobis':
                     dat_cov_tp=train_dat_cov[:,:,tp]
                     dat_cov_res_tp=train_dat_res_cov[:,:,tp]
-                    if new_version: # with a lot of dimensions, first performing pca and then using euclidian distance is faster (when using cdist)
-                        cov=covdiag(dat_cov_res_tp) # use covariance of the training data for pca
-                        train_dat_cov_avg = dat_cov_tp.mean(axis=0)
-                        X_test_tp_centered = X_test_tp - train_dat_cov_avg
-                        m_train_tp_centered = m_train_tp -train_dat_cov_avg
-                        evals,evecs = np.linalg.eigh(cov)
-                        idx = evals.argsort()[::-1]
-                        evals = evals[idx]
-                        evecs = evecs[:,idx]
-                        evals=evals.clip(1e-10) # avoid division by zero
-                        evals_sqrt = np.sqrt(evals)
-                        # compute euclidan distance in whitented pca space (which is identical to mahalanobis distance)
-                        distances_temp[:,test_index,irep,tp] = distance.cdist(np.dot(m_train_tp_centered,evecs)/evals_sqrt, np.dot(X_test_tp_centered,evecs)/evals_sqrt, 'euclidean')
-                    else:
-                        cov=inv(covdiag(dat_cov_tp)) 
-                        distances_temp[:,test_index,irep,tp]=distance.cdist(m_train_tp,X_test_tp,'mahalanobis', VI=cov) # compute distances between all test trials, and average train trials
+                    # if new_version: # with a lot of dimensions, first performing pca and then using euclidian distance is faster (when using cdist)
+                    #     cov=covdiag(dat_cov_res_tp) # use covariance of the training data for pca
+                    #     train_dat_cov_avg = dat_cov_tp.mean(axis=0)
+                    #     X_test_tp_centered = X_test_tp - train_dat_cov_avg
+                    #     m_train_tp_centered = m_train_tp -train_dat_cov_avg
+                    #     evals,evecs = np.linalg.eigh(cov)
+                    #     idx = evals.argsort()[::-1]
+                    #     evals = evals[idx]
+                    #     evecs = evecs[:,idx]
+                    #     evals=evals.clip(1e-10) # avoid division by zero
+                    #     evals_sqrt = np.sqrt(evals)
+                    #     # compute euclidan distance in whitented pca space (which is identical to mahalanobis distance)
+                    #     distances_temp[:,test_index,irep,tp] = distance.cdist(np.dot(m_train_tp_centered,evecs)/evals_sqrt, np.dot(X_test_tp_centered,evecs)/evals_sqrt, 'euclidean')
+                    # else:
+
+                    dat_cov_res_tp = torch.tensor(dat_cov_res_tp)
+                    
+                    cov=inv(covdiag(dat_cov_res_tp))
+                    # convert to torch tensor
+                    m_train_tp_tensor = torch.tensor(m_train_tp) 
+                    X_test_tp_tensor = torch.tensor(X_test_tp) 
+                    cov_tensor = torch.tensor(cov)
+                    cov_tensor = cov_tensor.float() 
+                    m_train_tp_tensor = m_train_tp_tensor.float()
+                    X_test_tp_tensor = X_test_tp_tensor.float()
+                    dists_temp= torchpairwise.cdist(m_train_tp_tensor, X_test_tp_tensor, metric='mahalanobis', VI=cov_tensor)
+                    # convert back to numpy
+                    distances_temp[:,test_index,irep,tp]=dists_temp.numpy()
+                    # distances_temp[:,test_index,irep,tp]=distance.cdist(m_train_tp,X_test_tp,'mahalanobis', VI=cov) # compute distances between all test trials, and average train trials
                 else:                    
                     distances_temp[:,test_index,irep,tp]=distance.cdist(m_train_tp,X_test_tp,'euclidean')
                    
@@ -482,7 +497,7 @@ def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=T
     if verbose:
         bar = ChargingBar('Processing', max=ang_steps*n_reps*n_folds*ntps)
     
-    dec_cos=np.empty((ang_steps,ntrls,ntps_trn,ntps))
+    dec_cos=np.empty((ang_steps,ntrls,ntps,ntps))
     distances=np.empty((ang_steps,len(angspace),ntrls,ntps_trn,ntps))
     
     dec_cos[:]=np.NaN

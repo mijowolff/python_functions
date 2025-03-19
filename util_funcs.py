@@ -3,6 +3,21 @@
 import numpy as np
 
 from scipy.ndimage import label, find_objects
+
+#%%
+def FastPvalue(obs,null_distr,tail=0):
+
+    null_distr=np.squeeze(null_distr)
+    p=np.sum(null_distr>=obs)/len(null_distr)
+
+    if tail==0:
+        p=2*np.min([p,1-p])
+    elif tail==1:
+        p=p
+    elif tail==-1:
+        p=1-p
+
+    return p
 #%% permutation t test as implemented in mne, but without correction
 
 
@@ -39,7 +54,7 @@ def permutation_t_test_no_correction(X, n_permutations=10000, tail=0, n_jobs=1,s
     # logger.info('Permuting %d times%s...' % (len(orders), extra))
     parallel, my_surrogate_stat, n_jobs = parallel_func(_surrogate_stat, n_jobs)
     surrogate_abs = np.concatenate(parallel(my_surrogate_stat(X, X2, p, dof_scaling)
-                                      for p in np.array_split(perms, n_jobs)))
+                    for p in np.array_split(perms, n_jobs)))
     surrogate_abs = np.concatenate((surrogate_abs, np.abs(T_obs[np.newaxis, :])))
     H0 = np.sort(surrogate_abs, axis=0)
     # compute UNCORRECTED p-values
@@ -210,7 +225,7 @@ def cluster_test(datobs, datrnd, tail=None, alpha=0.05, clusteralpha=0.05, clust
 
     h = p < alpha
 
-    return h, p, None
+    return h, p
 
 def find_and_characterize_clusters2(dat, clus_cand,clusterstat):
     labeled_array, num_features = label(clus_cand)
@@ -327,3 +342,8 @@ def cluster_test_helper(dat, nperm, diffstat='diff',verbose=True):
         print("done.")
 
     return datobs, datrnd
+#%%
+def moving_average(a, n=3):
+    ret = np.cumsum(a, dtype=float)
+    ret[n:] = ret[n:] - ret[:-n]
+    return ret[n - 1:] / n
