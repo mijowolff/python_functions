@@ -61,6 +61,7 @@ def covdiag(x):
     
     return sigma
 
+#%%
 def cosfun(theta,mu,basis_smooth,amplitude='default',offset='default'):
 
     if amplitude=='default':
@@ -68,7 +69,7 @@ def cosfun(theta,mu,basis_smooth,amplitude='default',offset='default'):
     if offset=='default':
         offset=.5
     return (offset+amplitude*np.cos(theta-mu))**basis_smooth
-
+#%%
 def basis_set_fun(theta_bins,u_theta,basis_smooth='default'):
         
     if basis_smooth=='default':
@@ -80,13 +81,13 @@ def basis_set_fun(theta_bins,u_theta,basis_smooth='default'):
         temp_kernel=cosfun(u_theta,u_theta[ci],basis_smooth)
         temp_kernel=np.expand_dims(temp_kernel,axis=[1,2])
         temp_kernel=np.tile(temp_kernel,(1,theta_bins.shape[1],theta_bins.shape[2]))
-        smooth_bins[ci,:,:]=np.nansum(theta_bins*temp_kernel,axis=0)/np.nansum(temp_kernel)                        
+        smooth_bins[ci,:,:]=np.sum(theta_bins*temp_kernel,axis=0)/sum(temp_kernel)                        
     
     return smooth_bins
 
 
 #%%  distance-based orientation decoding using cross-validation
-def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True,angspace='default',ang_steps=4,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True,mc_trls=True,mc_bins=True):
+def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True,angspace='default',ang_steps=4,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
     
     if verbose:
         from progress.bar import ChargingBar
@@ -128,6 +129,7 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
     angspaces=np.zeros((ang_steps,len(angspace)))
 
     for ans in range(0,ang_steps): # loop over all desired orientation spaces
+    
         angspace_temp=angspace+ans*bin_width/ang_steps
         angspaces[ans,:]=angspace_temp
 
@@ -169,23 +171,21 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
           
             train_dat_cov = np.empty((0,X_train.shape[1],X_train.shape[2]))
             train_dat_cov[:]=np.NaN
-
-            train_dat_res_cov = np.empty((0,X_train.shape[1],X_train.shape[2]))
-            train_dat_res_cov[:]=np.NaN
             
             if balanced_train_bins: # average over same orientaions of training set, but make sure these averages are based on balanced trials
                 count_min=min(np.bincount(y_subst_train))
                 for c in range(len(angspace_temp)):
                     temp_dat=X_train[y_train==angspace_temp[c],:,:]
                     ind=random.sample(list(range(temp_dat.shape[0])),count_min)
-                    m_temp[c,:,:]=np.nanmean(temp_dat[ind,:,:],axis=0)
+                    m_temp[c,:,:]=np.mean(temp_dat[ind,:,:],axis=0)
                     if balanced_cov: # if desired, the data used for the covariance can also be balanced
                         if residual_cov: # take the residual, note that this should only be done if the cov data is balanced!
-                            train_dat_res_cov = np.append(train_dat_res_cov, temp_dat[ind,:,:]-np.mean(temp_dat[ind,:,:],axis=0), axis=0)
-                        train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:], axis=0)
+                            train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:]-np.mean(temp_dat[ind,:,:],axis=0), axis=0)
+                        else:
+                            train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:], axis=0)
             else:
                 for c in range(len(angspace_temp)):
-                    m_temp[c,:,:]=np.nanmean(X_train[y_train==angspace_temp[c],:,:],axis=0)
+                    m_temp[c,:,:]=np.mean(X_train[y_train==angspace_temp[c],:,:],axis=0)
                     
             if basis_set: # smooth the averaged train data with basis set
                 m=basis_set_fun(m_temp,angspace_temp,basis_smooth='default')
@@ -193,10 +193,7 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
                 m=m_temp
             
             if not balanced_cov:
-                train_dat_cov=X_train # use all train trials if cov is not balanced  
-
-            if np.isnan(train_dat_res_cov).all():
-                train_dat_res_cov=train_dat_cov                     
+                train_dat_cov=X_train # use all train trials if cov is not balanced                       
                     
             for tp in range(ntps):
                 m_train_tp=m[:,:,tp]
@@ -204,9 +201,8 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
                 
                 if dist_metric=='mahalanobis':
                     dat_cov_tp=train_dat_cov[:,:,tp]
-                    dat_cov_res_tp=train_dat_res_cov[:,:,tp]
                     if new_version: # with a lot of dimensions, first performing pca and then using euclidian distance is faster (when using cdist)
-                        cov=covdiag(dat_cov_res_tp) # use covariance of the training data for pca
+                        cov=covdiag(dat_cov_tp) # use covariance of the training data for pca
                         train_dat_cov_avg = dat_cov_tp.mean(axis=0)
                         X_test_tp_centered = X_test_tp - train_dat_cov_avg
                         m_train_tp_centered = m_train_tp -train_dat_cov_avg
@@ -214,8 +210,8 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
                         idx = evals.argsort()[::-1]
                         evals = evals[idx]
                         evecs = evecs[:,idx]
-                        evals=evals.clip(1e-10) # avoid division by zero
                         evals_sqrt = np.sqrt(evals)
+
                         # compute euclidan distance in whitented pca space (which is identical to mahalanobis distance)
                         distances_temp[:,test_index,irep,tp] = distance.cdist(np.dot(m_train_tp_centered,evecs)/evals_sqrt, np.dot(X_test_tp_centered,evecs)/evals_sqrt, 'euclidean')
                     else:
@@ -227,14 +223,12 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
                 if verbose:    
                     bar.next()
 
-        distances[ans,:,:,:]=np.nanmean(distances_temp,axis=2,keepdims=False)
+        distances[ans,:,:,:]=np.mean(distances_temp,axis=2,keepdims=False)
     
-    if mc_trls:
-        distances=distances-np.nanmean(distances,axis=1,keepdims=True) # mean-center across trials
+    distances=distances-np.mean(distances,axis=1,keepdims=True)
     distances_flat=np.reshape(distances,(distances.shape[0]*distances.shape[1],distances.shape[2],distances.shape[3]),order='F')
-    if mc_bins:
-        distances_flat=distances_flat-np.nanmean(distances_flat,axis=0,keepdims=True) # mean-center across bins
-    dec_cos=np.squeeze(-np.nanmean(np.cos(theta_dists2)*distances_flat,axis=0))
+    distances_flat=distances_flat-np.mean(distances_flat,axis=0,keepdims=True)
+    dec_cos=np.squeeze(-np.mean(np.cos(theta_dists2)*distances_flat,axis=0))
 
     # order the distances, such that same angle distances are in the middle
     # first, assign each theta to a bin from angspace_full
@@ -251,7 +245,7 @@ def dist_theta_kfold(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True
 
     distances_ordered=np.zeros((distances_flat.shape))
 
-    shift_to=np.where(np.round(angspace_full,10)==0)[0][0]
+    shift_to=np.where(angspace_full==0)[0][0]
     for trl in range(len(theta)):
         distances_ordered[:,trl,:] = np.roll(distances_flat[:,trl,:], int(shift_to - theta_bin_dists_min_ind[trl]), axis=0)
     
@@ -441,7 +435,6 @@ def dist_theta_kfold_special(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_
         bar.finish()
     
     return dec_cos,distances,distances_ordered,angspaces,angspace_full
-
 #%%  orientation resconstrution using cross-validation, cross-temporal
 def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=True,angspace='default',ang_steps=4,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
     
@@ -549,9 +542,6 @@ def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=T
           
             train_dat_cov = np.empty((0,X_train.shape[1],X_train.shape[2]))
             train_dat_cov[:]=np.NaN
-
-            train_dat_res_cov = np.empty((0,X_train.shape[1],X_train.shape[2]))
-            train_dat_res_cov[:]=np.NaN
             
             if balanced_train_bins: # average over same orientaions of training set, but make sure these averages are based on balanced trials
                 count_min=min(np.bincount(y_subst_train))
@@ -559,10 +549,11 @@ def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=T
                     temp_dat=X_train[y_train==angspace_temp[c],:,:]
                     ind=random.sample(list(range(temp_dat.shape[0])),count_min)
                     m_temp[c,:,:]=np.mean(temp_dat[ind,:,:],axis=0)
-                    if balanced_cov:
-                        if residual_cov:
-                            train_dat_res_cov = np.append(train_dat_res_cov, temp_dat[ind,:,:]-np.mean(temp_dat[ind,:,:],axis=0), axis=0)
-                        train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:], axis=0)
+                    if balanced_cov: # if desired, the data used for the covariance can also be balanced
+                        if residual_cov: # take the residual, note that this should only be done if the cov data is balanced!
+                            train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:]-np.mean(temp_dat[ind,:,:],axis=0), axis=0)
+                        else:
+                            train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:], axis=0)
             else:
                 for c in range(len(angspace_temp)):
                     m_temp[c,:,:]=np.mean(X_train[y_train==angspace_temp[c],:,:],axis=0)
@@ -573,10 +564,7 @@ def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=T
                 m=m_temp
             
             if not balanced_cov:
-                train_dat_cov=X_train # use all train trials if cov is not balanced
-
-            if np.isnan(train_dat_res_cov).all():
-                train_dat_res_cov=train_dat_cov  
+                train_dat_cov=X_train # use all train trials if cov is not balanced    
                                
             # reshape test data for efficient distance computation
             X_test_rs=np.moveaxis(X_test,-1,1)
@@ -587,9 +575,8 @@ def dist_theta_kfold_ct(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_set=T
                        
                 if dist_metric=='mahalanobis':
                     dat_cov_tp=train_dat_cov[:,:,tp]
-                    dat_cov_res_tp=train_dat_res_cov[:,:,tp]
                     if new_version: # with a lot of dimensions, first performing pca and then using euclidian distance is faster (when using cdist)
-                        cov=covdiag(dat_cov_res_tp) # use covariance of the training data for pca
+                        cov=covdiag(dat_cov_tp) # use covariance of the training data for pca
                         train_dat_cov_avg = dat_cov_tp.mean(axis=0)
                         X_test_rs_centered = X_test_rs - train_dat_cov_avg
                         m_train_tp_centered = m_train_tp -train_dat_cov_avg
@@ -1207,7 +1194,6 @@ def dist_theta_kfold_ct_av2(data,theta,n_folds=8,n_reps=10,data_trn=None,basis_s
     dec_cos_av=np.mean(dec_cos_av,axis=0)
 
     return dec_cos_av
-
 #%%
 # without cross-validation; separate training and testing data
 def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='default',ang_steps=4,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
@@ -1292,9 +1278,6 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='
         for irep in range(n_reps):
             train_dat_cov = np.empty((0,X_train.shape[1],X_train.shape[2]))
             train_dat_cov[:]=np.NaN
-
-            train_dat_res_cov = np.empty((0,X_train.shape[1],X_train.shape[2]))
-            train_dat_res_cov[:]=np.NaN
             
             if balanced_train_bins:
                 count_min=min(np.bincount(y_subst_train))
@@ -1303,9 +1286,10 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='
                     ind=random.sample(list(range(temp_dat.shape[0])),count_min)
                     m_temp[c,:,:]=np.mean(temp_dat[ind,:,:],axis=0)
                     if balanced_cov:
-                        if residual_cov:
-                            train_dat_res_cov = np.append(train_dat_res_cov, temp_dat[ind,:,:]-np.mean(temp_dat[ind,:,:],axis=0), axis=0)
-                        train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:], axis=0) 
+                        if residual_cov: # take the residual, note that this should only be done if the cov data is balanced!
+                            train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:]-np.mean(temp_dat[ind,:,:],axis=0), axis=0)
+                        else:
+                            train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:], axis=0)
             else:
                 for c in range(len(angspace_temp)):
                     m_temp[c,:,:]=np.mean(X_train[y_train==angspace_temp[c],:,:],axis=0)
@@ -1317,9 +1301,6 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='
         
             if not balanced_cov:
                 train_dat_cov=X_train 
-
-            if np.isnan(train_dat_res_cov).all():
-                train_dat_res_cov=train_dat_cov  
                     
             for tp in range(ntps):
                 m_train_tp=m[:,:,tp]
@@ -1327,9 +1308,8 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='
                 
                 if dist_metric=='mahalanobis':
                     dat_cov_tp=train_dat_cov[:,:,tp]
-                    dat_cov_res_tp=train_dat_res_cov[:,:,tp]
                     if new_version: # with a lot of dimensions, first performing pca and then using euclidian distance is faster (when using cdist)
-                        cov=covdiag(dat_cov_res_tp) # use covariance of the training data for pca
+                        cov=covdiag(dat_cov_tp) # use covariance of the training data for pca
                         train_dat_cov_avg = dat_cov_tp.mean(axis=0)
                         X_test_tp_centered = X_test_tp - train_dat_cov_avg
                         m_train_tp_centered = m_train_tp -train_dat_cov_avg
@@ -1337,9 +1317,9 @@ def dist_theta(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspace='
                         idx = evals.argsort()[::-1]
                         evals = evals[idx]
                         evecs = evecs[:,idx]
-                        evals=evals.clip(1e-10) # avoid division by zero
+                        # evals=evals.clip(1e-10) # avoid division by zero
                         evals_sqrt = np.sqrt(evals)
-                        # compute euclidan distance in whitented pca space (which is identical to mahalanobis distance)
+                        # compute euclidan distance in whitened pca space (which is identical to mahalanobis distance)
                         distances_temp[:,:,irep,tp] = distance.cdist(np.dot(m_train_tp_centered,evecs)/evals_sqrt, np.dot(X_test_tp_centered,evecs)/evals_sqrt, 'euclidean')
                     else:                                
                         cov=inv(covdiag(dat_cov_tp))  
@@ -1470,34 +1450,29 @@ def dist_theta_ct(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspac
         for irep in range(n_reps):
             train_dat_cov = np.empty((0,X_tr.shape[1],X_tr.shape[2]))
             train_dat_cov[:]=np.NaN
-
-            train_dat_res_cov = np.empty((0,X_tr.shape[1],X_tr.shape[2]))
-            train_dat_res_cov[:]=np.NaN
             
-            if balanced_train_bins:
+            if balanced_train_bins: # average over same orientaions of training set, but make sure these averages are based on balanced trials
                 count_min=min(np.bincount(y_subst_train))
                 for c in range(len(angspace_temp)):
                     temp_dat=X_tr[y_train==angspace_temp[c],:,:]
                     ind=random.sample(list(range(temp_dat.shape[0])),count_min)
                     m_temp[c,:,:]=np.mean(temp_dat[ind,:,:],axis=0)
-                    if balanced_cov:
-                        if residual_cov:
-                            train_dat_res_cov = np.append(train_dat_res_cov, temp_dat[ind,:,:]-np.mean(temp_dat[ind,:,:],axis=0), axis=0)
-                        train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:], axis=0) 
+                    if balanced_cov: # if desired, the data used for the covariance can also be balanced
+                        if residual_cov: # take the residual, note that this should only be done if the cov data is balanced!
+                            train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:]-np.mean(temp_dat[ind,:,:],axis=0), axis=0)
+                        else:
+                            train_dat_cov = np.append(train_dat_cov, temp_dat[ind,:,:], axis=0)
             else:
                 for c in range(len(angspace_temp)):
                     m_temp[c,:,:]=np.mean(X_tr[y_train==angspace_temp[c],:,:],axis=0)
                     
-            if basis_set:
+            if basis_set: # smooth the averaged train data with basis set
                 m=basis_set_fun(m_temp,angspace_temp,basis_smooth='default')
             else:
                 m=m_temp
-        
+                                       
             if not balanced_cov:
                 train_dat_cov=X_tr # use all train trials if cov is not balanced
-
-            if np.isnan(train_dat_res_cov).all():
-                train_dat_res_cov=train_dat_cov  
                                
             # reshape test data for efficient distance computation
             X_test_rs=np.moveaxis(X_ts,-1,1)
@@ -1508,9 +1483,8 @@ def dist_theta_ct(data,theta,data_trn,theta_trn,n_reps=10,basis_set=True,angspac
                        
                 if dist_metric=='mahalanobis':
                     dat_cov_tp=train_dat_cov[:,:,tp]
-                    dat_cov_res_tp=train_dat_res_cov[:,:,tp]
                     if new_version: # with a lot of dimensions, first performing pca and then using euclidian distance is faster (when using cdist)
-                        cov=covdiag(dat_cov_res_tp) # use covariance of the training data for pca
+                        cov=covdiag(dat_cov_tp) # use covariance of the training data for pca
                         train_dat_cov_avg = dat_cov_tp.mean(axis=0)
                         X_test_rs_centered = X_test_rs - train_dat_cov_avg
                         m_train_tp_centered = m_train_tp -train_dat_cov_avg
@@ -1754,8 +1728,6 @@ def dist_theta_ct2(data,theta,theta2,data_trn,theta_trn,n_reps=10,basis_set=True
         bar.finish()
     
     return dec_cos,dec_cos2,distances,distances_ordered,angspaces,angspace_full 
-
-
 #%% categorical decoding using cross-validation   
 def dist_nominal_kfold(data,conditions,n_folds=8,n_reps=10,data_trn=None,balanced_train_bins=True,balanced_cov=False,residual_cov=False,dist_metric='mahalanobis',verbose=True,new_version=True):
     
